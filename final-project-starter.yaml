@@ -1,0 +1,144 @@
+Description: Cloud Formation Script For Udagram Servers
+Parameters:
+  EnvironmentName:
+    Description: A general Name to recognise resources with that belong to this same group
+    Type: String
+  ImageId:
+    Description: Servers Image Id 
+    Type: String 
+  InstanceType:
+    Description: Type of AWS Image 
+    Type: String
+  TestFileLocation:
+    Default: 'udagram-test/index.html'
+    Description: S3 bucket path to the test File
+    Type: String
+
+Resources:
+  ProfileWithRolesForOurApp:
+    Type: AWS::IAM::InstanceProfile
+    Properties: 
+      Roles:
+        - UdacityS3ReadOnlyEC2
+
+  BackendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${EnvironmentName}-BackendSecGroup'
+      GroupDescription: This is the Security Group for Private Backends
+      VpcId:
+        Fn::ImportValue:
+          !Sub '${EnvironmentName}-VPC'
+      SecurityGroupIngress:
+        - IpProtocol: tcp 
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-BackendSecurityGroup'
+
+  ServersLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      LaunchConfigurationName: !Ref EnvironmentName
+      AssociatePublicIpAddress: false
+      ImageId: !Ref ImageId
+      EbsOptimized: false
+      InstanceMonitoring: true
+      InstanceType: !Ref InstanceType
+      KeyName: refikey
+      IamInstanceProfile: !Ref ProfileWithRolesForOurApp 
+      SecurityGroups:
+        - !Ref BackendSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          apt-get update -y
+          apt-get install apache2 -y
+          systemctl start apache2.service
+          sudo apt install awscli -y
+          aws s3 cp s3://${TestFileLocation} .
+          location=$(curl -s http://169.254.169.254/latest/met a-data/placement/availability-zone)
+          sed -i "s/location/$location/" index.html
+          sudo scp index.html /var/www/html/index.html
+      BlockDeviceMappings:
+        - DeviceName: '/dev/sdk'
+          Ebs:
+            VolumeSize: '10'
+  
+  LBSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http to our load balancer
+      VpcId:
+        Fn::ImportValue:
+          !Sub "${EnvironmentName}-VPC"
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 8080
+        ToPort: 8080
+        CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 0
+        ToPort: 65535
+        CidrIp: 0.0.0.0/0
+  
+
+  WebAppLB:
+    Type: AWS::ElasticLoadBalancing::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      SecurityGroups:
+        - Ref: LBSecGroup
+      Subnets:
+      - Fn::ImportValue: !Sub "${EnvironmentName}-PUBNET1"
+      - Fn::ImportValue: !Sub "${EnvironmentName}-PUBNET2"
+  
+      Listeners:
+        - LoadBalancerPort: 80
+          InstancePort: 80
+          Protocol: HTTP
+          InstanceProtocol: HTTP
+      HealthCheck:
+        Target: HTTP:80/index.html
+        HealthyThreshold: 3 
+        Interval: 30
+        Timeout: 5
+        UnhealthyThreshold: 2
+
+  BackendAutoScalingGroup: 
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub '${EnvironmentName}-AutoScaling'
+      LaunchConfigurationName: !Ref ServersLaunchConfig
+      LoadBalancerNames:
+        - !Ref WebAppLB
+      MaxSize: 4
+      MinSize: 2
+      HealthCheckGracePeriod: 60
+      HealthCheckType: ELB
+      VPCZoneIdentifier:
+        - Fn::ImportValue:
+            !Sub '${EnvironmentName}-PRIVNETS'
+      Tags: 
+        - Key: Name
+          Value: !Ref EnvironmentName
+          PropagateAtLaunch: true
+
+Outputs:
+  BastionInstance:
+    Description: Domain Name of The Public Facing Load Balancer
+    Value: !Sub "http://${!GetAtt WebAppLB.DNSName}"
+    Export: 
+      Name: !Sub '${EnvironmentName}-LoadBalancerDNS'
