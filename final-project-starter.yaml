@@ -62,8 +62,9 @@ Resources:
           apt-get install apache2 -y
           systemctl start apache2.service
           sudo apt install awscli -y
+          sudo apt install amazon-ec2-utils -y
           aws s3 cp s3://${TestFileLocation} .
-          location=$(curl -s http://169.254.169.254/latest/met a-data/placement/availability-zone)
+          location=`ec2-metadata -z | cut -d':' -f2`
           sed -i "s/location/$location/" index.html
           sudo scp index.html /var/www/html/index.html
       BlockDeviceMappings:
@@ -83,14 +84,10 @@ Resources:
         FromPort: 80
         ToPort: 80
         CidrIp: 0.0.0.0/0
-      - IpProtocol: tcp
-        FromPort: 8080
-        ToPort: 8080
-        CidrIp: 0.0.0.0/0
       SecurityGroupEgress:
       - IpProtocol: tcp
-        FromPort: 0
-        ToPort: 65535
+        FromPort: 80
+        ToPort: 80
         CidrIp: 0.0.0.0/0
   
 
