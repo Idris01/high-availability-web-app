@@ -52,7 +52,6 @@ Resources:
       EbsOptimized: false
       InstanceMonitoring: true
       InstanceType: !Ref InstanceType
-      KeyName: refikey
       IamInstanceProfile: !Ref ProfileWithRolesForOurApp 
       SecurityGroups:
         - !Ref BackendSecurityGroup
