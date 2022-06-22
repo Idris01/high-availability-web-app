@@ -137,8 +137,8 @@ Resources:
           PropagateAtLaunch: true
 
 Outputs:
-  BastionInstance:
+  LoadBalancerDNS:
     Description: Domain Name of The Public Facing Load Balancer
-    Value: !Sub "http://${!GetAtt WebAppLB.DNSName}"
+    Value: !Sub "http://${WebAppLB.DNSName}"
     Export: 
       Name: !Sub '${EnvironmentName}-LoadBalancerDNS'
